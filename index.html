@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kanmaku Signage</title>
+<title>makuai-slide-scheduler</title>
 <style>
   :root {
     --bg:     #24202e;
@@ -335,12 +335,13 @@
 "use strict";
 
 /* ============================================================
- * Kanmaku Signage
+ * makuai-slide-scheduler
  * 登壇スケジュールに合わせて Google スライドを自動で切り替える
  * サイネージ表示。設定はブラウザに保存され、JSON で持ち運べる。
  * ============================================================ */
 
-var STORE_KEY = "kanmaku.config.v1";
+var STORE_KEY = "makuai.config.v1";
+var STORE_KEY_LEGACY = "kanmaku.config.v1";  // 旧名。保存済みの設定を引き継ぐ
 
 var BLANK = {
   eventName: "",
@@ -392,7 +393,8 @@ function normalize(c) {
 
 function loadStored() {
   try {
-    var raw = window.localStorage.getItem(STORE_KEY);
+    var raw = window.localStorage.getItem(STORE_KEY)
+           || window.localStorage.getItem(STORE_KEY_LEGACY);
     if (raw) return normalize(JSON.parse(raw));
   } catch (e) { /* file:// では使えないことがある */ }
   return null;

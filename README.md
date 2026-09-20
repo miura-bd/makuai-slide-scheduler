@@ -1,4 +1,4 @@
-# Kanmaku Signage
+# makuai-slide-scheduler
 
 カンファレンスの幕間に「次の登壇者」の予告スライドを映すサイネージです。登壇スケジュールを登録しておくと、時刻に応じて表示するスライドが自動で切り替わります。
 
@@ -82,7 +82,7 @@ timedatectl   # System clock synchronized: yes
 確実に保存したい場合や、設定ファイルをリポジトリで管理したい場合は、HTTP で配信します。
 
 ```sh
-cd /path/to/kanmaku-signage
+cd /path/to/makuai-slide-scheduler
 python3 -m http.server 8080
 ```
 
