@@ -94,9 +94,24 @@ git clone https://github.com/miura-bd/makuai-slide-scheduler.git
 
 | OS | 起動 |
 |---|---|
-| Linux / Raspberry Pi OS | ターミナルで `./signage.sh` |
-| macOS | `signage.command` をダブルクリック（またはターミナルで `./signage.sh`） |
+| Linux / Raspberry Pi OS | ターミナルで `./signage.sh`（下記参照） |
+| macOS | `signage.command` をダブルクリック |
 | Windows | `signage.cmd` をダブルクリック |
+
+Linux ではターミナルを開き、**展開したフォルダへ移動してから**実行します。
+
+```sh
+cd ~/Downloads/makuai-slide-scheduler-1.0.0   # 展開したフォルダの場所
+./signage.sh
+```
+
+Raspberry Pi OS のファイルマネージャなら、フォルダを右クリックして「ターミナルで開く」を選べば移動は済んでいます。`./signage.sh: No such file or directory` と出るときは、別の場所にいます。
+
+`Permission denied` と出る場合は実行権限が落ちています。Windows 経由や USB メモリ経由でコピーすると起こります。
+
+```sh
+chmod +x signage.sh signage.command
+```
 
 登録した内容が、そのままキオスク表示で出ます。ブラウザ探し、全画面化、前回の異常終了で出る「復元しますか」バーの抑止は、スクリプト側で済ませます。Linux では Wayland / X11 の判定と、SSH から起動したときの環境変数（`WAYLAND_DISPLAY` や `DISPLAY`）の補完も行います。
 
@@ -112,7 +127,7 @@ git clone https://github.com/miura-bd/makuai-slide-scheduler.git
 
 #### OS ごとの注意
 
-**Linux** — Wayland では画面の自動消灯をアプリ側から止められないため、先に切っておきます（X11 では `xset` で自動的に止めます）。
+**Linux** — 終了は起動したターミナルで `Ctrl+C`、または表示中に `Alt+F4`。Wayland では画面の自動消灯をアプリ側から止められないため、先に切っておきます（X11 では `xset` で自動的に止めます）。
 
 ```sh
 sudo raspi-config   # Display Options -> Screen Blanking -> No
