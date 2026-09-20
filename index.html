@@ -119,6 +119,7 @@
   }
   .overlay > .bar h1 { margin: 0; font-size: 20px; font-weight: 700; }
   .overlay > .bar .clock { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .overlay > .bar .ver   { color: var(--muted); font-size: 12px; }
   .overlay > .bar .spacer { flex: 1; }
 
   .scroll { flex: 1 1 auto; overflow-y: auto; padding: 24px 28px 8px; }
@@ -262,6 +263,7 @@
   <div class="bar">
     <h1 id="adminTitle">設定</h1>
     <span class="clock" id="adminClock"></span>
+    <span class="ver" id="adminVer"></span>
     <span class="spacer"></span>
     <button id="btnClose">表示に戻る（Esc）</button>
   </div>
@@ -344,6 +346,7 @@
  * サイネージ表示。設定はブラウザに保存され、JSON で持ち運べる。
  * ============================================================ */
 
+var VERSION    = "1.0.0";
 var STORE_KEY  = "makuai.config.v1";
 // 進行補正は端末ごとの値。?config= で共有の設定を読む運用でも失われないよう別に持つ。
 var OFFSET_KEY = "makuai.offset.v1";
@@ -667,6 +670,7 @@ function formFromCfg() {
   document.getElementById("gOffset").value = cfg.offsetMin;
   document.getElementById("gTz").value     = cfg.tz;
   document.getElementById("gTz").classList.remove("bad");
+  document.getElementById("adminVer").textContent = "v" + VERSION;
   document.getElementById("adminTitle").textContent =
     cfg.eventName ? cfg.eventName + " — 設定" : "設定";
   drawRows();
