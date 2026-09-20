@@ -1,0 +1,27 @@
+{
+  "eventName": "Example Conference 2026 / Track A",
+  "delaySec": 30,
+  "bufferMin": 5,
+  "offsetMin": 0,
+  "tz": "Asia/Tokyo",
+  "decks": [
+    {
+      "talk": "13:00",
+      "showFrom": "00:00",
+      "name": "一人目",
+      "id": "https://docs.google.com/presentation/d/e/XXXXXXXXXXXX/pub?start=true&loop=true&delayms=30000"
+    },
+    {
+      "talk": "13:30",
+      "showFrom": "",
+      "name": "二人目",
+      "id": "https://docs.google.com/presentation/d/e/YYYYYYYYYYYY/pub?start=true&loop=true&delayms=30000"
+    },
+    {
+      "talk": "14:00",
+      "showFrom": "",
+      "name": "三人目",
+      "id": "https://docs.google.com/presentation/d/e/ZZZZZZZZZZZZ/pub?start=true&loop=true&delayms=30000"
+    }
+  ]
+}

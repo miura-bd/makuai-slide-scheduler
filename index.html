@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kanmaku Signage</title>
+<style>
+  :root {
+    --bg:     #24202e;
+    --panel:  #2e2939;
+    --line:   #453e54;
+    --ink:    #f3f1f6;
+    --muted:  #a49bb5;
+    --accent: #2ec4b6;
+    --warn:   #ffd166;
+  }
+
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #000; overflow: hidden;
+    font-family: "Noto Sans CJK JP", "Noto Sans JP", system-ui, sans-serif;
+    color: var(--ink);
+  }
+
+  /* ---------- 表示面 ---------- */
+  #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  #frame { border: 0; display: block; background: #000; }
+  #frame[hidden], #placeholder[hidden] { display: none; }
+
+  /* iframe にフォーカスが移ると Google スライド側がキーを奪い、
+     こちらの操作キーが一切効かなくなる。クリックを通さないことで防ぐ。 */
+  #frame { pointer-events: none; }
+  #shield {
+    position: fixed; inset: 0;
+    background: transparent;
+    z-index: 10;
+  }
+  #shield:focus { outline: none; }
+
+  /* スライド未設定のときの代替表示 */
+  #placeholder {
+    display: flex; flex-direction: column; justify-content: center;
+    background: var(--bg);
+    padding: 0 8%;
+    box-sizing: border-box;
+  }
+  #placeholder .event {
+    font-size: 2.0vw; color: var(--muted); margin-bottom: 1.6vw;
+  }
+  #placeholder .time {
+    font-size: 8.5vw; line-height: 1; font-weight: 700;
+    color: var(--accent); font-variant-numeric: tabular-nums;
+    margin-bottom: 1.2vw;
+  }
+  #placeholder .name {
+    font-size: 5.2vw; line-height: 1.25; font-weight: 700;
+  }
+  #placeholder .pending {
+    margin-top: 3.4vw; font-size: 1.7vw; color: var(--muted);
+  }
+
+  /* ---------- 状態表示 ---------- */
+  #hud {
+    position: fixed; left: 24px; bottom: 24px;
+    display: flex; align-items: stretch; gap: 16px;
+    padding: 14px 20px;
+    background: rgba(36, 32, 46, 0.94);
+    border-left: 3px solid var(--accent);
+    font-size: 15px; line-height: 1.7;
+    opacity: 0; transition: opacity 180ms ease;
+    pointer-events: none; max-width: 52ch;
+  }
+  #hud.show { opacity: 1; }
+  #hud b { font-weight: 700; }
+  .mode-manual { color: var(--warn); }
+  .mode-auto   { color: var(--accent); }
+  #hud .keys {
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid rgba(255,255,255,0.18);
+    font-size: 13px; color: var(--muted);
+  }
+
+  /* 表示が消えるまでの残り時間 */
+  #hudRing { flex: 0 0 auto; align-self: center; display: block; }
+  #hudRing .ring-track {
+    display: initial;
+    fill: none; stroke: rgba(255,255,255,0.16); stroke-width: 3;
+  }
+  #hudRing .ring-bar {
+    display: initial;
+    fill: none; stroke: var(--accent); stroke-width: 3;
+    stroke-linecap: round;
+    transform: rotate(-90deg); transform-origin: 50% 50%;
+  }
+  #hudRing text {
+    fill: var(--muted); font-size: 11px; font-weight: 600;
+    text-anchor: middle; font-variant-numeric: tabular-nums;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #hudRing .ring-bar { transition: none; }
+  }
+
+  /* ---------- 共通オーバーレイ ---------- */
+  .overlay {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: none; flex-direction: column;
+    z-index: 100;
+  }
+  .overlay.open { display: flex; }
+
+  .overlay > .bar {
+    display: flex; align-items: baseline; gap: 20px;
+    padding: 20px 28px; border-bottom: 1px solid var(--line);
+    flex: 0 0 auto;
+  }
+  .overlay > .bar h1 { margin: 0; font-size: 20px; font-weight: 700; }
+  .overlay > .bar .clock { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .overlay > .bar .spacer { flex: 1; }
+
+  .scroll { flex: 1 1 auto; overflow-y: auto; padding: 24px 28px 8px; }
+
+  /* ---------- 初回セットアップ ---------- */
+  #setup .inner { max-width: 62ch; margin: 0 auto; padding: 8vh 0 6vh; }
+  #setup h2 { font-size: 27px; margin: 0 0 14px; line-height: 1.35; }
+  #setup p  { font-size: 15px; line-height: 1.85; color: var(--muted); margin: 0 0 18px; }
+  #setup ol { font-size: 15px; line-height: 1.95; color: var(--muted); padding-left: 1.4em; margin: 0 0 26px; }
+  #setup ol b { color: var(--ink); font-weight: 600; }
+  #setup .cta { display: flex; gap: 12px; flex-wrap: wrap; }
+  #setup .why {
+    margin-top: 34px; padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-size: 13.5px; line-height: 1.8; color: var(--muted);
+  }
+  code {
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 0.92em; background: var(--panel);
+    padding: 2px 6px; border-radius: 3px;
+  }
+
+  /* ---------- 設定画面 ---------- */
+  .globals {
+    display: flex; flex-wrap: wrap; gap: 26px;
+    padding-bottom: 22px; margin-bottom: 22px;
+    border-bottom: 1px solid var(--line);
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 13px; color: var(--muted); }
+  .field .note { font-size: 12px; color: var(--muted); }
+
+  input, select, textarea {
+    background: var(--panel); border: 1px solid var(--line); color: var(--ink);
+    padding: 8px 10px; font-size: 14px; font-family: inherit; border-radius: 3px;
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input.time  { width: 82px; font-variant-numeric: tabular-nums; }
+  input.name  { width: 150px; }
+  input.url   { width: 100%; font-size: 12.5px; }
+  input.num   { width: 92px; }
+  input.wide  { width: 230px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 13px; color: var(--muted); font-weight: 400; padding: 0 10px 10px 0; }
+  td { padding: 5px 10px 5px 0; vertical-align: middle; }
+  tr.live td { background: rgba(46, 196, 182, 0.09); }
+  td.urlcell { width: 100%; min-width: 220px; }
+  td.ops { white-space: nowrap; }
+  td.ops button { margin-right: 4px; }
+  .rowno { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; white-space: nowrap; }
+  tr.live .rowno { color: var(--accent); font-weight: 700; }
+  .empty { color: var(--muted); font-size: 14px; padding: 18px 0; }
+  .addrow { padding: 14px 0 6px; }
+  .addrow button { border-style: dashed; color: var(--muted); }
+  .addrow button:hover { color: var(--ink); border-style: solid; }
+
+  button {
+    background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+    padding: 9px 16px; font-size: 14px; font-family: inherit;
+    border-radius: 3px; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.primary { background: var(--accent); color: #0f2620; border-color: var(--accent); font-weight: 700; }
+  button.icon { padding: 6px 11px; font-size: 13px; }
+
+  .actions {
+    flex: 0 0 auto; display: flex; gap: 12px; align-items: center;
+    padding: 18px 28px; border-top: 1px solid var(--line); flex-wrap: wrap;
+  }
+  .actions .spacer { flex: 1; }
+  #msg { font-size: 13px; color: var(--accent); }
+  #msg.warn { color: var(--warn); }
+
+  dialog {
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 22px; max-width: 74ch; width: 82vw;
+  }
+  dialog::backdrop { background: rgba(0,0,0,0.62); }
+  dialog h2 { margin: 0 0 6px; font-size: 17px; }
+  dialog p { margin: 0 0 14px; font-size: 13.5px; color: var(--muted); line-height: 1.7; }
+  textarea {
+    width: 100%; height: 44vh; background: var(--bg);
+    font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 12.5px; line-height: 1.6; resize: vertical;
+  }
+  dialog .row { display: flex; gap: 10px; margin-top: 14px; align-items: center; }
+
+  @media (prefers-reduced-motion: reduce) { #hud { transition: none; } }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <iframe id="frame" allowfullscreen title="スライド" tabindex="-1" scrolling="no"></iframe>
+  <div id="placeholder" hidden>
+    <div class="event" id="phEvent"></div>
+    <div class="time"  id="phTime"></div>
+    <div class="name"  id="phName"></div>
+    <div class="pending" id="phPending"></div>
+  </div>
+</div>
+<div id="shield" tabindex="0" aria-label="サイネージ表示。操作方法は H キー。"></div>
+<div id="hud" role="status" aria-live="polite">
+  <svg id="hudRing" width="38" height="38" viewBox="0 0 38 38" aria-hidden="true">
+    <circle class="ring-track" cx="19" cy="19" r="15.5"></circle>
+    <circle class="ring-bar" id="hudBar" cx="19" cy="19" r="15.5" pathLength="100" stroke-dasharray="100 100"></circle>
+    <text id="hudSec" x="19" y="23">6</text>
+  </svg>
+  <div id="hudBody"></div>
+</div>
+
+<!-- ======================= 初回セットアップ ======================= -->
+<div id="setup" class="overlay">
+  <div class="scroll">
+    <div class="inner">
+      <h2>スライドがまだ登録されていません</h2>
+      <p>登壇スケジュールを登録すると、時刻に応じて次の登壇者の予告スライドへ自動で切り替わります。</p>
+      <ol>
+        <li>各スライドを Google スライドで <b>ファイル → 共有 → ウェブに公開</b></li>
+        <li>自動送りの間隔を選び、<b>開始と繰り返しの両方にチェック</b></li>
+        <li>発行された URL を控える</li>
+        <li>下のボタンから登壇者と時刻を登録する</li>
+      </ol>
+      <div class="cta">
+        <button class="primary" id="btnSetupOpen">スケジュールを登録する</button>
+        <button id="btnSetupSample">サンプルを読み込んで試す</button>
+      </div>
+      <div class="why">
+        設定はこの端末のブラウザに保存されます。複数の端末で使う場合や、設定を残しておきたい場合は、設定画面の「書き出し / 読み込み」から JSON を控えてください。<code>?config=schedule.json</code> のように URL で外部ファイルを指定することもできます。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= 設定画面 ======================= -->
+<div id="admin" class="overlay">
+  <div class="bar">
+    <h1 id="adminTitle">設定</h1>
+    <span class="clock" id="adminClock"></span>
+    <span class="spacer"></span>
+    <button id="btnClose">表示に戻る（Esc）</button>
+  </div>
+
+  <div class="scroll">
+    <div class="globals">
+      <div class="field">
+        <label for="gEvent">イベント名</label>
+        <input class="wide" type="text" id="gEvent" placeholder="任意">
+        <span class="note">この画面の見出しに出ます</span>
+      </div>
+      <div class="field">
+        <label for="gDelay">1枚あたりの表示秒数</label>
+        <input class="num" type="number" id="gDelay" min="1" step="1">
+        <span class="note">スライド送りの間隔</span>
+      </div>
+      <div class="field">
+        <label for="gBuffer">切り替えバッファ（分）</label>
+        <input class="num" type="number" id="gBuffer" min="0" step="1">
+        <span class="note">登壇開始から次の予告に移るまで</span>
+      </div>
+      <div class="field">
+        <label for="gOffset">進行補正（分）</label>
+        <input class="num" type="number" id="gOffset" step="1">
+        <span class="note">押していればマイナス、巻いていればプラス</span>
+      </div>
+      <div class="field">
+        <label for="gTz">判定タイムゾーン</label>
+        <input class="wide" type="text" id="gTz" placeholder="Asia/Tokyo">
+        <span class="note">端末の設定に依存せず判定</span>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:54px"></th>
+          <th style="width:98px">登壇開始</th>
+          <th style="width:98px">表示開始</th>
+          <th style="width:160px">登壇者</th>
+          <th>スライドのURL</th>
+          <th style="width:130px"></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="emptyNote" hidden>まだ1件も登録されていません。下の「行を追加」から始めてください。</div>
+    <div class="addrow"><button id="btnAdd">＋ 行を追加</button></div>
+  </div>
+
+  <div class="actions">
+    <button id="btnIO">書き出し / 読み込み</button>
+    <button id="btnSample">サンプルを読み込む</button>
+    <button id="btnReset">すべて消す</button>
+    <span class="spacer"></span>
+    <span id="msg"></span>
+    <button class="primary" id="btnSave">保存して反映</button>
+  </div>
+</div>
+
+<dialog id="ioDlg">
+  <h2>書き出し / 読み込み</h2>
+  <p>この JSON を保存しておけば、別の端末や次回のイベントにそのまま持ち込めます。貼り付けて「読み込む」を押すと、現在の設定を置き換えます。</p>
+  <textarea id="ioText" spellcheck="false" aria-label="設定 JSON"></textarea>
+  <div class="row">
+    <button class="primary" id="btnImport">読み込む</button>
+    <button id="btnCopy">コピー</button>
+    <button id="btnDownload">ファイルに保存</button>
+    <span class="spacer" style="flex:1"></span>
+    <button id="btnIoClose">閉じる</button>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+
+/* ============================================================
+ * Kanmaku Signage
+ * 登壇スケジュールに合わせて Google スライドを自動で切り替える
+ * サイネージ表示。設定はブラウザに保存され、JSON で持ち運べる。
+ * ============================================================ */
+
+var STORE_KEY = "kanmaku.config.v1";
+
+var BLANK = {
+  eventName: "",
+  delaySec:  30,
+  bufferMin: 5,
+  offsetMin: 0,
+  tz:        "Asia/Tokyo",
+  decks:     []
+};
+
+// 動かし方を掴んでもらうための見本。実在のスライドは含まない。
+var SAMPLE = {
+  eventName: "サンプルイベント",
+  delaySec:  30,
+  bufferMin: 5,
+  offsetMin: 0,
+  tz:        "Asia/Tokyo",
+  decks: [
+    { talk: "13:00", showFrom: "00:00", name: "一人目", id: "" },
+    { talk: "13:30", showFrom: "",      name: "二人目", id: "" },
+    { talk: "14:00", showFrom: "",      name: "三人目", id: "" }
+  ]
+};
+
+var cfg = null;
+
+/* ---------- 設定の読み込み ----------
+ * 優先順位: ?config=<URL> → ブラウザ保存 → 空
+ * 外部ファイルの取得は http(s) 配信時のみ。file:// では CORS で拒否される。
+ */
+function normalize(c) {
+  c = c && typeof c === "object" ? c : {};
+  return {
+    eventName: typeof c.eventName === "string" ? c.eventName : "",
+    delaySec:  Math.max(1, Number(c.delaySec) || 30),
+    bufferMin: c.bufferMin === undefined ? 5 : Math.max(0, Number(c.bufferMin) || 0),
+    offsetMin: Number(c.offsetMin) || 0,
+    tz:        (c.tz || "Asia/Tokyo").trim(),
+    decks:     Array.isArray(c.decks) ? c.decks.map(function (d) {
+      return {
+        talk:     String(d && d.talk     || ""),
+        showFrom: String(d && d.showFrom || ""),
+        name:     String(d && d.name     || ""),
+        id:       String(d && d.id       || "")
+      };
+    }) : []
+  };
+}
+
+function loadStored() {
+  try {
+    var raw = window.localStorage.getItem(STORE_KEY);
+    if (raw) return normalize(JSON.parse(raw));
+  } catch (e) { /* file:// では使えないことがある */ }
+  return null;
+}
+
+function save() {
+  try {
+    window.localStorage.setItem(STORE_KEY, JSON.stringify(cfg));
+    return true;
+  } catch (e) { return false; }
+}
+
+function externalConfigUrl() {
+  var m = /[?&]config=([^&]+)/.exec(window.location.search);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function boot() {
+  var url = externalConfigUrl();
+  if (!url) { start(loadStored() || normalize(BLANK)); return; }
+
+  fetch(url, { cache: "no-store" })
+    .then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    })
+    .then(function (json) { start(normalize(json)); })
+    .catch(function (err) {
+      console.warn("設定ファイルを読み込めませんでした:", err);
+      start(loadStored() || normalize(BLANK));
+    });
+}
+
+/* ---------- 時刻 ---------- */
+function toMin(hhmm) {
+  var m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || "").trim());
+  return m ? (+m[1]) * 60 + (+m[2]) : null;
+}
+function pad(n) { return (n < 10 ? "0" : "") + n; }
+function tzFormat(opts) {
+  try {
+    return new Intl.DateTimeFormat("en-GB",
+      Object.assign({ timeZone: cfg.tz, hour12: false }, opts)).format(new Date());
+  } catch (e) {
+    return new Intl.DateTimeFormat("en-GB",
+      Object.assign({ hour12: false }, opts)).format(new Date());
+  }
+}
+function nowMin()   { return toMin(tzFormat({ hour: "2-digit", minute: "2-digit" })); }
+function clockStr() { return tzFormat({ hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
+
+// 表示開始が空なら「前の登壇開始 + バッファ」。先頭行は常に 00:00 扱い。
+function effectiveShowFrom(i) {
+  var explicit = toMin(cfg.decks[i].showFrom);
+  if (explicit !== null) return explicit;
+  if (i === 0) return 0;
+  var prev = toMin(cfg.decks[i - 1].talk);
+  return prev === null ? 0 : prev + cfg.bufferMin;
+}
+
+/* ---------- 表示 ---------- */
+var frame = document.getElementById("frame");
+var hud   = document.getElementById("hud");
+var manualIndex  = null;
+var currentIndex = -1;
+
+// 貼り付けられた値を埋め込み用 URL に直す。
+// 編集URL・共有URL・公開URL・素のファイルIDのいずれでも受け取れる。
+function embedUrl(d) {
+  var ms = Math.max(1, cfg.delaySec) * 1000;
+  var params = "start=true&loop=true&delayms=" + ms + "&rm=minimal";
+  var base = "https://docs.google.com/presentation";
+  var s = (d.id || "").trim();
+  if (!s) return "about:blank";
+
+  // ウェブに公開した URL: /presentation/d/e/<公開ID>/pub など
+  var m = /\/presentation\/d\/e\/([A-Za-z0-9_-]+)/.exec(s);
+  if (m) return base + "/d/e/" + m[1] + "/embed?" + params;
+
+  // 通常の共有・編集 URL: /presentation/d/<ファイルID>/edit など
+  m = /\/presentation\/d\/([A-Za-z0-9_-]+)/.exec(s);
+  if (m) return base + "/d/" + m[1] + "/embed?" + params;
+
+  // Google スライド以外の URL はそのまま使う
+  if (s.indexOf("http") === 0) {
+    return s + (s.indexOf("?") >= 0 ? "&" : "?") + params;
+  }
+
+  // 素のファイルID
+  return base + "/d/" + encodeURIComponent(s) + "/embed?" + params;
+}
+
+function scheduledIndex() {
+  var now = nowMin() + cfg.offsetMin;
+  var idx = 0;
+  for (var i = 0; i < cfg.decks.length; i++) {
+    if (now >= effectiveShowFrom(i)) idx = i;
+  }
+  return idx;
+}
+function targetIndex() {
+  if (!cfg.decks.length) return -1;
+  if (manualIndex !== null && manualIndex < cfg.decks.length) return manualIndex;
+  return scheduledIndex();
+}
+
+var placeholder = document.getElementById("placeholder");
+
+// スライド未設定の枠では、登壇者と時刻だけのカードを出す。
+// 黒画面を出さないための代替であって、正常な運用状態ではない。
+function drawPlaceholder(d) {
+  document.getElementById("phEvent").textContent = cfg.eventName || "";
+  document.getElementById("phTime").textContent  = d.talk || "";
+  document.getElementById("phName").textContent  = d.name || "登壇者未設定";
+  document.getElementById("phPending").textContent =
+    "この枠のスライドはまだ登録されていません（S キーで設定）";
+}
+
+function render(force) {
+  var idx = targetIndex();
+  if (idx < 0) {
+    frame.hidden = true; placeholder.hidden = true;
+    frame.src = "about:blank"; currentIndex = -1; showSetup();
+    return;
+  }
+  var d = cfg.decks[idx];
+  var hasSlide = !!(d.id || "").trim();
+
+  if (idx !== currentIndex || force) {
+    currentIndex = idx;
+    if (hasSlide) { frame.src = embedUrl(d); }
+    else if (frame.src !== "about:blank") { frame.src = "about:blank"; }
+  }
+
+  frame.hidden = !hasSlide;
+  placeholder.hidden = hasSlide;
+  if (!hasSlide) drawPlaceholder(d);
+  fit();
+}
+
+function fit() {
+  var w = window.innerWidth, h = window.innerHeight;
+  var fw = w, fh = Math.round(w * 9 / 16);
+  if (fh > h) { fh = h; fw = Math.round(h * 16 / 9); }
+  frame.style.width  = fw + "px";
+  frame.style.height = fh + "px";
+  placeholder.style.width  = fw + "px";
+  placeholder.style.height = fh + "px";
+}
+
+var HUD_MS = 6000;                       // 表示しつづける時間
+var hudBody = document.getElementById("hudBody");
+var hudBar  = document.getElementById("hudBar");
+var hudSec  = document.getElementById("hudSec");
+var RING_LEN = 100;                      // pathLength で正規化
+var hudUntil = 0;
+var hudRaf   = null;
+
+// 残り時間をリングの弧の長さで示す。数字だけだと視線が奪われるので、
+// 減っていく様子そのものを見せる。
+function tickHudRing() {
+  var left = hudUntil - Date.now();
+  if (left <= 0) {
+    hud.classList.remove("show");
+    hudBar.style.strokeDasharray = "0 " + RING_LEN;
+    hudRaf = null;
+    return;
+  }
+  var ratio = left / HUD_MS;
+  hudBar.style.strokeDasharray = (RING_LEN * ratio) + " " + RING_LEN;
+  hudSec.textContent = Math.ceil(left / 1000);
+  hudRaf = window.requestAnimationFrame(tickHudRing);
+}
+
+function showHud() {
+  if (currentIndex < 0) return;
+  var d = cfg.decks[currentIndex];
+  var mode = manualIndex !== null
+    ? '<span class="mode-manual">手動固定</span>'
+    : '<span class="mode-auto">自動</span>';
+  var off = cfg.offsetMin === 0 ? "" :
+    " / 補正 " + (cfg.offsetMin > 0 ? "+" : "") + cfg.offsetMin + "分";
+  hudBody.innerHTML =
+    "現在 " + clockStr() + " — " + mode + off + "<br>" +
+    "表示中 <b>" + pad(currentIndex + 1) + " " + (d.name || "(名称未設定)") +
+    "</b>（登壇 " + (d.talk || "--:--") + "）" +
+    '<div class="keys">1〜9 固定 / 0 自動 / ← → 5分ずらす / S 設定 / R 再読み込み / H この表示</div>';
+
+  hud.classList.add("show");
+  hudUntil = Date.now() + HUD_MS;        // キーを押すたびに満タンへ戻る
+  if (!hudRaf) hudRaf = window.requestAnimationFrame(tickHudRing);
+}
+
+/* ---------- 画面の出し分け ---------- */
+var setupEl = document.getElementById("setup");
+var adminEl = document.getElementById("admin");
+
+function showSetup()  { if (!adminEl.classList.contains("open")) setupEl.classList.add("open"); }
+function hideSetup()  { setupEl.classList.remove("open"); }
+function openAdmin()  { hideSetup(); formFromCfg(); adminEl.classList.add("open"); document.getElementById("gEvent").focus(); }
+function closeAdmin() {
+  adminEl.classList.remove("open");
+  document.getElementById("msg").textContent = "";
+  if (!cfg.decks.length) showSetup();
+  setTimeout(grabFocus, 0);
+}
+function adminOpen() { return adminEl.classList.contains("open"); }
+
+/* ---------- 設定画面 ---------- */
+var rowsEl  = document.getElementById("rows");
+var msgEl   = document.getElementById("msg");
+var emptyEl = document.getElementById("emptyNote");
+
+function esc(s) {
+  return String(s === undefined || s === null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function formFromCfg() {
+  document.getElementById("gEvent").value  = cfg.eventName;
+  document.getElementById("gDelay").value  = cfg.delaySec;
+  document.getElementById("gBuffer").value = cfg.bufferMin;
+  document.getElementById("gOffset").value = cfg.offsetMin;
+  document.getElementById("gTz").value     = cfg.tz;
+  document.getElementById("adminTitle").textContent =
+    cfg.eventName ? cfg.eventName + " — 設定" : "設定";
+  drawRows();
+}
+
+function drawRows() {
+  rowsEl.innerHTML = "";
+  cfg.decks.forEach(function (d, i) {
+    var tr = document.createElement("tr");
+    if (i === currentIndex) tr.className = "live";
+    tr.innerHTML =
+      '<td class="rowno">' + pad(i + 1) + (i === currentIndex ? " ▶" : "") + "</td>" +
+      '<td><input class="time" data-k="talk"     data-i="' + i + '" value="' + esc(d.talk) + '" placeholder="13:00" aria-label="登壇開始"></td>' +
+      '<td><input class="time" data-k="showFrom" data-i="' + i + '" value="' + esc(d.showFrom) + '" placeholder="自動" aria-label="表示開始"></td>' +
+      '<td><input class="name" data-k="name"     data-i="' + i + '" value="' + esc(d.name) + '" aria-label="登壇者"></td>' +
+      '<td class="urlcell"><input class="url" data-k="id" data-i="' + i + '" value="' + esc(d.id) + '" placeholder="スライドのURLを貼り付け（編集画面のURLでも可）" aria-label="スライド"></td>' +
+      '<td class="ops">' +
+        '<button class="icon" data-act="up"   data-i="' + i + '" title="上へ">↑</button>' +
+        '<button class="icon" data-act="down" data-i="' + i + '" title="下へ">↓</button>' +
+        '<button class="icon" data-act="del"  data-i="' + i + '">削除</button>' +
+      "</td>";
+    rowsEl.appendChild(tr);
+  });
+  emptyEl.hidden = cfg.decks.length > 0;
+}
+
+// 表示中の行のハイライトだけ差し替える。
+// 入力欄を作り直すとフォーカスが外れ、ペーストが途切れるため。
+function updateLiveRow() {
+  var trs = rowsEl.children;
+  for (var i = 0; i < trs.length; i++) {
+    var live = (i === currentIndex);
+    trs[i].classList.toggle("live", live);
+    var no = trs[i].querySelector(".rowno");
+    if (no) no.textContent = pad(i + 1) + (live ? " ▶" : "");
+  }
+}
+
+function cfgFromForm() {
+  cfg.eventName = document.getElementById("gEvent").value.trim();
+  cfg.delaySec  = Math.max(1, Number(document.getElementById("gDelay").value) || 30);
+  cfg.bufferMin = Math.max(0, Number(document.getElementById("gBuffer").value) || 0);
+  cfg.offsetMin = Number(document.getElementById("gOffset").value) || 0;
+  cfg.tz        = document.getElementById("gTz").value.trim() || "Asia/Tokyo";
+}
+
+function flash(text, warn) {
+  msgEl.textContent = text;
+  msgEl.className = warn ? "warn" : "";
+  setTimeout(function () { msgEl.textContent = ""; }, 6000);
+}
+
+rowsEl.addEventListener("input", function (e) {
+  var t = e.target;
+  if (!t.dataset.k) return;
+  cfg.decks[+t.dataset.i][t.dataset.k] = t.value;
+});
+
+rowsEl.addEventListener("click", function (e) {
+  var b = e.target.closest("button[data-act]");
+  if (!b) return;
+  var i = +b.dataset.i, a = b.dataset.act, t;
+  if (a === "del") {
+    cfg.decks.splice(i, 1);
+  } else if (a === "up" && i > 0) {
+    t = cfg.decks[i - 1]; cfg.decks[i - 1] = cfg.decks[i]; cfg.decks[i] = t;
+  } else if (a === "down" && i < cfg.decks.length - 1) {
+    t = cfg.decks[i + 1]; cfg.decks[i + 1] = cfg.decks[i]; cfg.decks[i] = t;
+  }
+  drawRows();
+});
+
+document.getElementById("btnAdd").addEventListener("click", function () {
+  cfg.decks.push({ talk: "", showFrom: "", name: "", id: "" });
+  drawRows();
+  var last = rowsEl.querySelector("tr:last-child input");
+  if (last) last.focus();
+});
+
+document.getElementById("btnSave").addEventListener("click", function () {
+  cfgFromForm();
+  var ok = save();
+  manualIndex = null;
+  render(true);
+  formFromCfg();
+  flash(ok ? "保存しました" :
+             "反映しました。この端末には記憶できないので、書き出しから控えを取ってください", !ok);
+});
+
+document.getElementById("btnReset").addEventListener("click", function () {
+  if (!window.confirm("登録内容をすべて消します。よろしいですか。")) return;
+  cfg = normalize(BLANK); save(); formFromCfg(); render(true);
+});
+
+function loadSample() {
+  cfg = normalize(SAMPLE); save(); render(true); openAdmin();
+  flash("サンプルを読み込みました。スライドの URL を入れてください");
+}
+document.getElementById("btnSample").addEventListener("click", loadSample);
+document.getElementById("btnSetupSample").addEventListener("click", loadSample);
+document.getElementById("btnSetupOpen").addEventListener("click", openAdmin);
+document.getElementById("btnClose").addEventListener("click", closeAdmin);
+
+/* ---------- 書き出し / 読み込み ---------- */
+var ioDlg  = document.getElementById("ioDlg");
+var ioText = document.getElementById("ioText");
+
+document.getElementById("btnIO").addEventListener("click", function () {
+  cfgFromForm();
+  ioText.value = JSON.stringify(cfg, null, 2);
+  ioDlg.showModal();
+});
+document.getElementById("btnIoClose").addEventListener("click", function () { ioDlg.close(); });
+
+document.getElementById("btnCopy").addEventListener("click", function () {
+  ioText.select();
+  try { document.execCommand("copy"); } catch (e) {}
+});
+
+document.getElementById("btnDownload").addEventListener("click", function () {
+  var blob = new Blob([ioText.value], { type: "application/json" });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "schedule.json";
+  a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+});
+
+document.getElementById("btnImport").addEventListener("click", function () {
+  try {
+    cfg = normalize(JSON.parse(ioText.value));
+    save(); formFromCfg(); render(true); ioDlg.close();
+    flash("読み込みました");
+  } catch (e) {
+    window.alert("読み込めませんでした。JSON の形式を確認してください。\n\n" + e.message);
+  }
+});
+
+/* ---------- キー入力の確保 ----------
+ * iframe にフォーカスが入ると Google スライド側がキーを処理してしまい、
+ * 手動送りや設定画面が開けなくなる。常に受け皿へフォーカスを戻す。
+ */
+var shield = document.getElementById("shield");
+
+function grabFocus() {
+  if (adminOpen() || setupEl.classList.contains("open")) return;
+  if (document.activeElement !== shield) {
+    try { shield.focus({ preventScroll: true }); } catch (e) { shield.focus(); }
+  }
+}
+shield.addEventListener("mousedown", function (e) { e.preventDefault(); grabFocus(); });
+window.addEventListener("focus", grabFocus);
+window.addEventListener("blur", function () { setTimeout(grabFocus, 0); });
+setInterval(grabFocus, 2000);
+
+/* ---------- キー操作 ---------- */
+document.addEventListener("keydown", function (e) {
+  if (adminOpen()) { if (e.key === "Escape") closeAdmin(); return; }
+
+  if (setupEl.classList.contains("open")) {
+    if (e.key === "s" || e.key === "S") { e.preventDefault(); openAdmin(); }
+    return;
+  }
+
+  var k = e.key;
+  if (k >= "1" && k <= "9") {
+    var i = +k - 1;
+    if (i < cfg.decks.length) { manualIndex = i; render(false); }
+  } else if (k === "0") {
+    manualIndex = null; render(false);
+  } else if (k === "ArrowRight") {
+    cfg.offsetMin += 5; save(); render(false);
+  } else if (k === "ArrowLeft") {
+    cfg.offsetMin -= 5; save(); render(false);
+  } else if (k === "s" || k === "S") {
+    e.preventDefault();   // 直後にフォーカスする入力欄へ s が流れ込むのを防ぐ
+    openAdmin();
+    return;
+  } else if (k === "r" || k === "R") {
+    render(true);
+  } else if (k === "h" || k === "H") {
+    /* 表示のみ */
+  } else {
+    return;
+  }
+  e.preventDefault();
+  showHud();
+});
+
+/* ---------- 起動 ---------- */
+function start(loaded) {
+  cfg = loaded;
+  window.addEventListener("resize", fit);
+  fit();
+  if (!cfg.decks.length) { showSetup(); } else { render(true); grabFocus(); }
+
+  setInterval(function () { if (cfg.decks.length) render(false); }, 10000);
+  setInterval(function () { if (cfg.decks.length) render(true);  }, 45 * 60 * 1000);
+  setInterval(function () {
+    document.getElementById("adminClock").textContent = clockStr() + " " + cfg.tz;
+    if (adminOpen()) updateLiveRow();
+  }, 1000);
+}
+
+boot();
+</script>
+</body>
+</html>

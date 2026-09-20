@@ -1,0 +1,6 @@
+# イベントごとの実データ。登壇者名やスライドURLを含むため共有しない。
+schedule.json
+schedule.*.json
+!schedule.example.json
+
+.DS_Store
