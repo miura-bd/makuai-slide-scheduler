@@ -68,21 +68,59 @@ try_linux() { # $1=コマンド名    $2=設定の置き場所
   if [ -z "$browser" ] && command -v "$1" >/dev/null 2>&1; then browser="$1"; config_dir="$2"; fi
 }
 
+# 設定はブラウザごとに別なので、index.html をダブルクリックしたブラウザと
+# ここで選ぶブラウザが食い違うと、登録した内容が出てこない。既定のブラウザが
+# Chrome 系なら、それを最優先にする。
+default_browser_id() {
+  if [ "$os" = "macos" ]; then
+    defaults read com.apple.LaunchServices/com.apple.launchservices.secure LSHandlers 2>/dev/null |
+      awk 'BEGIN { RS = "}" }
+           /LSHandlerURLScheme = http;/ {
+             if (match($0, /LSHandlerRoleAll = "[^"]+"/)) {
+               print tolower(substr($0, RSTART + 20, RLENGTH - 21)); exit
+             }
+           }'
+  else
+    xdg-settings get default-web-browser 2>/dev/null
+  fi
+}
+
+prefer=""
+case "$(default_browser_id)" in
+  *chrome*|*chromium*) prefer="chrome" ;;   # org.chromium.chromium も含む
+  *edge*)              prefer="edge" ;;
+esac
+
+find_chrome() {
+  if [ "$os" = "macos" ]; then
+    try_mac "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"      "$support/Google/Chrome"
+    try_mac "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "$support/Google/Chrome"
+    try_mac "/Applications/Chromium.app/Contents/MacOS/Chromium"                "$support/Chromium"
+  else
+    try_linux chromium             "$HOME/.config/chromium"
+    try_linux chromium-browser     "$HOME/.config/chromium"
+    try_linux chromium-bin         "$HOME/.config/chromium"
+    try_linux google-chrome-stable "$HOME/.config/google-chrome"
+    try_linux google-chrome        "$HOME/.config/google-chrome"
+  fi
+}
+
+find_edge() {
+  if [ "$os" = "macos" ]; then
+    try_mac "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"      "$support/Microsoft Edge"
+    try_mac "$HOME/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" "$support/Microsoft Edge"
+  else
+    try_linux microsoft-edge "$HOME/.config/microsoft-edge"
+  fi
+}
+
+support="$HOME/Library/Application Support"
 if [ -n "${MAKUAI_BROWSER:-}" ]; then
   browser="$MAKUAI_BROWSER"
-elif [ "$os" = "macos" ]; then
-  support="$HOME/Library/Application Support"
-  try_mac "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   "$support/Google/Chrome"
-  try_mac "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "$support/Google/Chrome"
-  try_mac "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" "$support/Microsoft Edge"
-  try_mac "/Applications/Chromium.app/Contents/MacOS/Chromium"             "$support/Chromium"
+elif [ "$prefer" = "edge" ]; then
+  find_edge; find_chrome
 else
-  try_linux chromium             "$HOME/.config/chromium"
-  try_linux chromium-browser     "$HOME/.config/chromium"
-  try_linux chromium-bin         "$HOME/.config/chromium"
-  try_linux google-chrome-stable "$HOME/.config/google-chrome"
-  try_linux google-chrome        "$HOME/.config/google-chrome"
-  try_linux microsoft-edge       "$HOME/.config/microsoft-edge"
+  find_chrome; find_edge
 fi
 
 if [ -z "$browser" ]; then
@@ -185,7 +223,11 @@ else
   flags+=(--window-size=1280,720)
 fi
 
-echo "signage.sh: $browser ($display) で起動します"
+why=""
+if [ -n "${MAKUAI_BROWSER:-}" ]; then why="  ← MAKUAI_BROWSER の指定"
+elif [ -n "$prefer" ];            then why="  ← 既定のブラウザ"
+fi
+echo "signage.sh: $browser ($display) で起動します$why"
 echo "  ページ         : $page"
 if [ -n "$profile" ]; then
   echo "  プロファイル   : $profile"

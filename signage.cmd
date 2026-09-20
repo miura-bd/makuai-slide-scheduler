@@ -55,11 +55,22 @@ if defined MAKUAI_BROWSER (
   set "BROWSER=%MAKUAI_BROWSER%"
   for %%I in ("%MAKUAI_BROWSER%") do set "PROC=%%~nxI"
 )
-call :find "%ProgramFiles%\Google\Chrome\Application\chrome.exe"  chrome.exe
-call :find "%PF86%\Google\Chrome\Application\chrome.exe"          chrome.exe
-call :find "%LocalAppData%\Google\Chrome\Application\chrome.exe"  chrome.exe
-call :find "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" msedge.exe
-call :find "%PF86%\Microsoft\Edge\Application\msedge.exe"         msedge.exe
+rem 設定はブラウザごとに別なので、index.html をダブルクリックしたブラウザと
+rem ここで選ぶブラウザが食い違うと、登録した内容が出てこない。
+rem Edge は最初から入っているため、既定が Edge で Chrome も入っている環境は珍しくない。
+set "PROGID="
+for /f "tokens=3" %%A in ('reg query "HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice" /v ProgId 2^>nul ^| find /I "ProgId"') do set "PROGID=%%A"
+set "PREFER="
+echo %PROGID% | find /I "MSEdge" >nul && set "PREFER=edge"
+echo %PROGID% | find /I "Chrome" >nul && set "PREFER=chrome"
+
+if /I "%PREFER%"=="edge" (
+  call :findedge
+  call :findchrome
+) else (
+  call :findchrome
+  call :findedge
+)
 
 if not defined BROWSER (
   echo signage.cmd: Chrome / Edge が見つかりません。
@@ -91,12 +102,27 @@ set "FLAGS=%FLAGS% --autoplay-policy=no-user-gesture-required"
 set "FLAGS=%FLAGS% --overscroll-history-navigation=0"
 if defined MAKUAI_PROFILE set "FLAGS=%FLAGS% --user-data-dir=%MAKUAI_PROFILE%"
 
-echo signage.cmd: %PROC% で起動します
+set "WHY="
+if defined MAKUAI_BROWSER set "WHY=  ← MAKUAI_BROWSER の指定"
+if not defined MAKUAI_BROWSER if defined PREFER set "WHY=  ← 既定のブラウザ"
+echo signage.cmd: %PROC% で起動します%WHY%
 echo   ページ : %PAGE%
 if "%WINMODE%"=="--kiosk" echo   終了   : 表示中に Alt+F4
 
 start "" "%BROWSER%" %FLAGS% %WINMODE%%EXTRA% "%URL%"
 exit /b 0
+
+:findchrome
+call :find "%ProgramFiles%\Google\Chrome\Application\chrome.exe" chrome.exe
+call :find "%PF86%\Google\Chrome\Application\chrome.exe"         chrome.exe
+call :find "%LocalAppData%\Google\Chrome\Application\chrome.exe" chrome.exe
+goto :eof
+
+:findedge
+call :find "%ProgramFiles%\Microsoft\Edge\Application\msedge.exe" msedge.exe
+call :find "%PF86%\Microsoft\Edge\Application\msedge.exe"         msedge.exe
+call :find "%LocalAppData%\Microsoft\Edge\Application\msedge.exe" msedge.exe
+goto :eof
 
 :find
 if defined BROWSER goto :eof
