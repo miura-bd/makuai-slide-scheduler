@@ -23,7 +23,7 @@
 - **タイムゾーン固定の判定** — 端末のタイムゾーン設定に依存しない
 - **進行のズレを吸収** — 押し / 巻きを矢印キーで 5 分ずつ補正
 - **スライド未設定でも止まらない** — 空の枠は登壇者カードで埋める
-- **キオスク前提** — Raspberry Pi を HDMI に繋いで放置する運用を想定
+- **キオスク前提** — `./signage.sh` を叩けば Raspberry Pi でサイネージモードに入る
 
 ## クイックスタート
 
@@ -49,20 +49,35 @@
 
 ![設定画面](docs/images/admin.png)
 
-### 4. キオスク表示する
+### 4. サイネージモードで起動する
 
 ```sh
-chromium --kiosk --password-store=basic \
-  --disable-session-crashed-bubble --disable-infobars --noerrdialogs \
-  "file:///path/to/index.html"
+./signage.sh
 ```
 
-Wayland 環境（Raspberry Pi OS Bookworm 以降など）で SSH から起動する場合は、環境変数を明示します。
+Chromium をキオスク表示で開きます。Wayland / X11 の判定、SSH から起動したときの環境変数（`WAYLAND_DISPLAY` や `DISPLAY`）の補完、前回の異常終了で出る「復元しますか」バーの抑止は、スクリプト側で済ませます。
+
+| コマンド | 用途 |
+|---|---|
+| `./signage.sh` | キオスク表示（本番） |
+| `./signage.sh --windowed` | ウィンドウ表示（本番前の確認用） |
+| `./signage.sh -- <引数...>` | 以降を Chromium にそのまま渡す |
+
+設定は Chromium のプロファイルに保存されます。普段のブラウジング用と混ざらないよう `~/.config/makuai-slide-scheduler/chromium` を使うので、**スケジュールの登録もこのスクリプトで開いた画面から行ってください**（表示中に `S` キー）。置き場所は `MAKUAI_PROFILE` で変えられます。
+
+Wayland では画面の自動消灯をアプリ側から止められないため、先に切っておきます。
 
 ```sh
-export XDG_RUNTIME_DIR=/run/user/$(id -u)
-export WAYLAND_DISPLAY=wayland-0
-chromium --ozone-platform=wayland --kiosk ... "file://$HOME/index.html"
+sudo raspi-config   # Display Options -> Screen Blanking -> No
+```
+
+スクリプトを使わない場合は、次のコマンドとほぼ同じことをしています。
+
+```sh
+chromium --kiosk --ozone-platform=wayland --password-store=basic \
+  --disable-session-crashed-bubble --disable-infobars --noerrdialogs \
+  --user-data-dir="$HOME/.config/makuai-slide-scheduler/chromium" \
+  "file:///path/to/index.html"
 ```
 
 ## 切り替えの考え方
@@ -120,7 +135,9 @@ URL が空の枠に切り替わると、黒画面ではなく登壇者名と時�
 
 ## 設定の保存先
 
-設定はブラウザの localStorage に保存されます。`file://` で開いた場合、ブラウザによっては保存できないことがあります。その場合は保存時に警告が出るので、設定画面の「書き出し / 読み込み」から JSON を控えてください。
+設定はブラウザの localStorage に保存されます。`signage.sh` が使う Chromium では `file://` でも保存できますが、ブラウザによっては保存できないことがあります。その場合は保存時に警告が出るので、設定画面の「書き出し / 読み込み」から JSON を控えてください。
+
+プロファイルごと消すと登録もやり直しになるので、イベントをまたいで使う設定は JSON で控えておくのが安全です。
 
 確実に保存したい場合や、設定ファイルをリポジトリで管理したい場合は、HTTP で配信します。
 
