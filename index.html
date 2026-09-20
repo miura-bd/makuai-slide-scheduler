@@ -614,7 +614,7 @@ function showHud() {
     "現在 " + clockStr() + " — " + mode + off + tzNote + "<br>" +
     "表示中 <b>" + pad(currentIndex + 1) + " " + (d.name || "(名称未設定)") +
     "</b>（登壇 " + (d.talk || "--:--") + "）" +
-    '<div class="keys">1〜9 固定 / 0 自動 / ← → 5分ずらす / S 設定 / R 再読み込み / H この表示</div>';
+    '<div class="keys">1〜9 固定 / 0 自動 / ← → 5分ずらす / S 設定 / R 再読み込み / H 状態表示</div>';
 
   hud.classList.add("show");
   hudUntil = Date.now() + HUD_MS;        // キーを押すたびに満タンへ戻る
