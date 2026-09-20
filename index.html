@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>makuai-slide-scheduler</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2324202e'/%3E%3Cpath d='M13 10l9 6-9 6z' fill='%232ec4b6'/%3E%3C/svg%3E">
 <style>
   :root {
     --bg:     #24202e;
@@ -153,6 +154,7 @@
     padding: 8px 10px; font-size: 14px; font-family: inherit; border-radius: 3px;
   }
   input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input.bad { border-color: var(--warn); background: rgba(255, 209, 102, 0.08); }
   input.time  { width: 82px; font-variant-numeric: tabular-nums; }
   input.name  { width: 150px; }
   input.url   { width: 100%; font-size: 12.5px; }
@@ -340,7 +342,10 @@
  * サイネージ表示。設定はブラウザに保存され、JSON で持ち運べる。
  * ============================================================ */
 
-var STORE_KEY = "makuai.config.v1";
+var STORE_KEY  = "makuai.config.v1";
+// 進行補正は端末ごとの値。?config= で共有の設定を読む運用でも失われないよう別に持つ。
+var OFFSET_KEY = "makuai.offset.v1";
+var DEFAULT_TZ = "Asia/Tokyo";
 
 var BLANK = {
   eventName: "",
@@ -378,7 +383,7 @@ function normalize(c) {
     delaySec:  Math.max(1, Number(c.delaySec) || 30),
     bufferMin: c.bufferMin === undefined ? 5 : Math.max(0, Number(c.bufferMin) || 0),
     offsetMin: Number(c.offsetMin) || 0,
-    tz:        (c.tz || "Asia/Tokyo").trim(),
+    tz:        (c.tz || DEFAULT_TZ).trim(),
     decks:     Array.isArray(c.decks) ? c.decks.map(function (d) {
       return {
         talk:     String(d && d.talk     || ""),
@@ -399,10 +404,24 @@ function loadStored() {
 }
 
 function save() {
+  saveOffset(cfg.offsetMin);
   try {
     window.localStorage.setItem(STORE_KEY, JSON.stringify(cfg));
     return true;
   } catch (e) { return false; }
+}
+
+function loadOffset() {
+  try {
+    var raw = window.localStorage.getItem(OFFSET_KEY);
+    if (raw === null) return null;
+    var v = Number(raw);
+    return isFinite(v) ? v : null;
+  } catch (e) { return null; }
+}
+
+function saveOffset(v) {
+  try { window.localStorage.setItem(OFFSET_KEY, String(v)); } catch (e) { /* 保存できなくても続行 */ }
 }
 
 function externalConfigUrl() {
@@ -429,28 +448,40 @@ function boot() {
 /* ---------- 時刻 ---------- */
 function toMin(hhmm) {
   var m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || "").trim());
-  return m ? (+m[1]) * 60 + (+m[2]) : null;
+  if (!m) return null;
+  var h = +m[1], mi = +m[2];
+  return (h < 24 && mi < 60) ? h * 60 + mi : null;
 }
 function pad(n) { return (n < 10 ? "0" : "") + n; }
+
+function tzValid(tz) {
+  try { new Intl.DateTimeFormat("en-GB", { timeZone: String(tz) }); return true; }
+  catch (e) { return false; }
+}
+
+// 綴りを間違えた場合に端末のタイムゾーンへ落ちると、
+// 「端末設定に依存しない」という前提が黙って崩れる。既定値へ寄せる。
 function tzFormat(opts) {
   try {
     return new Intl.DateTimeFormat("en-GB",
       Object.assign({ timeZone: cfg.tz, hour12: false }, opts)).format(new Date());
   } catch (e) {
     return new Intl.DateTimeFormat("en-GB",
-      Object.assign({ hour12: false }, opts)).format(new Date());
+      Object.assign({ timeZone: DEFAULT_TZ, hour12: false }, opts)).format(new Date());
   }
 }
 function nowMin()   { return toMin(tzFormat({ hour: "2-digit", minute: "2-digit" })); }
 function clockStr() { return tzFormat({ hour: "2-digit", minute: "2-digit", second: "2-digit" }); }
 
 // 表示開始が空なら「前の登壇開始 + バッファ」。先頭行は常に 00:00 扱い。
+// 前の行の登壇開始が読めないときは null を返す。0 を返すと、書式ミス 1 つで
+// その行が 00:00 から表示扱いになり、開場前から先の枠が映ってしまう。
 function effectiveShowFrom(i) {
   var explicit = toMin(cfg.decks[i].showFrom);
   if (explicit !== null) return explicit;
   if (i === 0) return 0;
   var prev = toMin(cfg.decks[i - 1].talk);
-  return prev === null ? 0 : prev + cfg.bufferMin;
+  return prev === null ? null : prev + cfg.bufferMin;
 }
 
 /* ---------- 表示 ---------- */
@@ -489,7 +520,8 @@ function scheduledIndex() {
   var now = nowMin() + cfg.offsetMin;
   var idx = 0;
   for (var i = 0; i < cfg.decks.length; i++) {
-    if (now >= effectiveShowFrom(i)) idx = i;
+    var from = effectiveShowFrom(i);   // null = 表示開始を決められない行
+    if (from !== null && now >= from) idx = i;
   }
   return idx;
 }
@@ -575,8 +607,11 @@ function showHud() {
     : '<span class="mode-auto">自動</span>';
   var off = cfg.offsetMin === 0 ? "" :
     " / 補正 " + (cfg.offsetMin > 0 ? "+" : "") + cfg.offsetMin + "分";
+  var tzNote = tzValid(cfg.tz) ? "" :
+    '<br><span class="mode-manual">タイムゾーン「' + esc(cfg.tz) +
+    '」は認識できません。' + DEFAULT_TZ + " で判定しています</span>";
   hudBody.innerHTML =
-    "現在 " + clockStr() + " — " + mode + off + "<br>" +
+    "現在 " + clockStr() + " — " + mode + off + tzNote + "<br>" +
     "表示中 <b>" + pad(currentIndex + 1) + " " + (d.name || "(名称未設定)") +
     "</b>（登壇 " + (d.talk || "--:--") + "）" +
     '<div class="keys">1〜9 固定 / 0 自動 / ← → 5分ずらす / S 設定 / R 再読み込み / H この表示</div>';
@@ -608,15 +643,28 @@ var emptyEl = document.getElementById("emptyNote");
 
 function esc(s) {
   return String(s === undefined || s === null ? "" : s)
-    .replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    .replace(/&/g, "&amp;").replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/* 設定画面の編集は draft に溜める。cfg を直接書き換えると、保存せずに
+ * 閉じた編集が表示へ漏れ、その後の矢印キーの save() で確定してしまう。 */
+var draft = [];
+
+function cloneDecks(decks) {
+  return decks.map(function (d) {
+    return { talk: d.talk, showFrom: d.showFrom, name: d.name, id: d.id };
+  });
 }
 
 function formFromCfg() {
+  draft = cloneDecks(cfg.decks);
   document.getElementById("gEvent").value  = cfg.eventName;
   document.getElementById("gDelay").value  = cfg.delaySec;
   document.getElementById("gBuffer").value = cfg.bufferMin;
   document.getElementById("gOffset").value = cfg.offsetMin;
   document.getElementById("gTz").value     = cfg.tz;
+  document.getElementById("gTz").classList.remove("bad");
   document.getElementById("adminTitle").textContent =
     cfg.eventName ? cfg.eventName + " — 設定" : "設定";
   drawRows();
@@ -624,7 +672,7 @@ function formFromCfg() {
 
 function drawRows() {
   rowsEl.innerHTML = "";
-  cfg.decks.forEach(function (d, i) {
+  draft.forEach(function (d, i) {
     var tr = document.createElement("tr");
     if (i === currentIndex) tr.className = "live";
     tr.innerHTML =
@@ -640,7 +688,7 @@ function drawRows() {
       "</td>";
     rowsEl.appendChild(tr);
   });
-  emptyEl.hidden = cfg.decks.length > 0;
+  emptyEl.hidden = draft.length > 0;
 }
 
 // 表示中の行のハイライトだけ差し替える。
@@ -655,12 +703,48 @@ function updateLiveRow() {
   }
 }
 
-function cfgFromForm() {
-  cfg.eventName = document.getElementById("gEvent").value.trim();
-  cfg.delaySec  = Math.max(1, Number(document.getElementById("gDelay").value) || 30);
-  cfg.bufferMin = Math.max(0, Number(document.getElementById("gBuffer").value) || 0);
-  cfg.offsetMin = Number(document.getElementById("gOffset").value) || 0;
-  cfg.tz        = document.getElementById("gTz").value.trim() || "Asia/Tokyo";
+function readForm() {
+  return normalize({
+    eventName: document.getElementById("gEvent").value.trim(),
+    delaySec:  Number(document.getElementById("gDelay").value),
+    bufferMin: Number(document.getElementById("gBuffer").value),
+    offsetMin: Number(document.getElementById("gOffset").value),
+    tz:        document.getElementById("gTz").value.trim() || DEFAULT_TZ,
+    decks:     cloneDecks(draft)
+  });
+}
+
+/* 入力の不備は、保存させたうえで本番中に静かに効くより、その場で止めたい。
+ * 該当の入力欄に印を付け、最初の1件を文言で返す。 */
+function validateForm() {
+  var problems = [];
+  var tzEl = document.getElementById("gTz");
+  var tz = tzEl.value.trim() || DEFAULT_TZ;
+  var tzNg = !tzValid(tz);
+  tzEl.classList.toggle("bad", tzNg);
+  if (tzNg) problems.push("タイムゾーン「" + tz + "」は認識できません");
+
+  var inputs = rowsEl.querySelectorAll('input[data-k="talk"], input[data-k="showFrom"]');
+  for (var i = 0; i < inputs.length; i++) {
+    var el = inputs[i];
+    var ng = el.value.trim() !== "" && toMin(el.value) === null;
+    el.classList.toggle("bad", ng);
+    if (ng) problems.push((+el.dataset.i + 1) + " 行目の時刻「" + el.value.trim() +
+                          "」は hh:mm で入れてください");
+  }
+
+  // 登壇開始が読めない行は、次の行の表示開始も決められなくなる
+  draft.forEach(function (d, i) {
+    var next = draft[i + 1];
+    if (!next || toMin(next.showFrom) !== null) return;
+    if (toMin(d.talk) !== null) return;
+    var el = rowsEl.querySelector('input[data-k="talk"][data-i="' + i + '"]');
+    if (el) el.classList.add("bad");
+    problems.push((i + 1) + " 行目の登壇開始が空です。" +
+                  (i + 2) + " 行目の表示開始を決められません");
+  });
+
+  return problems;
 }
 
 function flash(text, warn) {
@@ -672,7 +756,10 @@ function flash(text, warn) {
 rowsEl.addEventListener("input", function (e) {
   var t = e.target;
   if (!t.dataset.k) return;
-  cfg.decks[+t.dataset.i][t.dataset.k] = t.value;
+  draft[+t.dataset.i][t.dataset.k] = t.value;
+  if (t.dataset.k === "talk" || t.dataset.k === "showFrom") {
+    t.classList.toggle("bad", t.value.trim() !== "" && toMin(t.value) === null);
+  }
 });
 
 rowsEl.addEventListener("click", function (e) {
@@ -680,24 +767,40 @@ rowsEl.addEventListener("click", function (e) {
   if (!b) return;
   var i = +b.dataset.i, a = b.dataset.act, t;
   if (a === "del") {
-    cfg.decks.splice(i, 1);
+    if (!confirmDelete(draft[i])) return;
+    draft.splice(i, 1);
   } else if (a === "up" && i > 0) {
-    t = cfg.decks[i - 1]; cfg.decks[i - 1] = cfg.decks[i]; cfg.decks[i] = t;
-  } else if (a === "down" && i < cfg.decks.length - 1) {
-    t = cfg.decks[i + 1]; cfg.decks[i + 1] = cfg.decks[i]; cfg.decks[i] = t;
+    t = draft[i - 1]; draft[i - 1] = draft[i]; draft[i] = t;
+  } else if (a === "down" && i < draft.length - 1) {
+    t = draft[i + 1]; draft[i + 1] = draft[i]; draft[i] = t;
   }
   drawRows();
 });
 
+// 中身のある行の取り消しは効かないので、空行のときだけ黙って消す
+function confirmDelete(d) {
+  var filled = d && (d.talk || d.showFrom || d.name || d.id);
+  return !filled || window.confirm(
+    "この行を削除します。よろしいですか。\n\n" +
+    (d.talk || "--:--") + "  " + (d.name || "(名称未設定)"));
+}
+
 document.getElementById("btnAdd").addEventListener("click", function () {
-  cfg.decks.push({ talk: "", showFrom: "", name: "", id: "" });
+  draft.push({ talk: "", showFrom: "", name: "", id: "" });
   drawRows();
   var last = rowsEl.querySelector("tr:last-child input");
   if (last) last.focus();
 });
 
 document.getElementById("btnSave").addEventListener("click", function () {
-  cfgFromForm();
+  var problems = validateForm();
+  if (problems.length) {
+    flash(problems[0] + (problems.length > 1 ? "（他 " + (problems.length - 1) + " 件）" : ""), true);
+    var first = rowsEl.querySelector("input.bad") || document.querySelector("#gTz.bad");
+    if (first) first.focus();
+    return;
+  }
+  cfg = readForm();
   var ok = save();
   manualIndex = null;
   render(true);
@@ -725,15 +828,18 @@ var ioDlg  = document.getElementById("ioDlg");
 var ioText = document.getElementById("ioText");
 
 document.getElementById("btnIO").addEventListener("click", function () {
-  cfgFromForm();
-  ioText.value = JSON.stringify(cfg, null, 2);
+  ioText.value = JSON.stringify(readForm(), null, 2);
   ioDlg.showModal();
 });
 document.getElementById("btnIoClose").addEventListener("click", function () { ioDlg.close(); });
 
 document.getElementById("btnCopy").addEventListener("click", function () {
   ioText.select();
-  try { document.execCommand("copy"); } catch (e) {}
+  // file:// や http:// では Clipboard API が使えないため従来の方法に落とす
+  var legacy = function () { try { document.execCommand("copy"); } catch (e) {} };
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(ioText.value).catch(legacy);
+  } else { legacy(); }
 });
 
 document.getElementById("btnDownload").addEventListener("click", function () {
@@ -809,6 +915,8 @@ document.addEventListener("keydown", function (e) {
 /* ---------- 起動 ---------- */
 function start(loaded) {
   cfg = loaded;
+  var devOffset = loadOffset();      // ?config= を読み直しても補正は端末に残る
+  if (devOffset !== null) cfg.offsetMin = devOffset;
   window.addEventListener("resize", fit);
   fit();
   if (!cfg.decks.length) { showSetup(); } else { render(true); grabFocus(); }
