@@ -1,0 +1,5 @@
+# cmd.exe はラベル解決で改行コードに敏感なので、CRLF を保つ
+*.cmd text eol=crlf
+# シェルスクリプトは常に LF
+*.sh      text eol=lf
+*.command text eol=lf

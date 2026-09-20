@@ -3,19 +3,18 @@
 # makuai-slide-scheduler をサイネージモードで起動する。
 #
 #   ./signage.sh             キオスク表示で起動する（本番）
-#   ./signage.sh --windowed  ウィンドウで起動する（本番前の確認用）
+#   ./signage.sh --windowed  ウィンドウで起動する（設定や本番前の確認用）
 #   ./signage.sh --help
 #
-# Raspberry Pi OS を想定しているが、Chromium がある Linux なら動く。
-# `--` 以降の引数は Chromium にそのまま渡す。
+# Linux（Raspberry Pi OS を含む）と macOS で動く。Windows は signage.cmd を使う。
+# `--` 以降の引数はブラウザにそのまま渡す。
 #
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 page="$here/index.html"
-# 既定ではブラウザ本来のプロファイルを使う。index.html をダブルクリックして
-# 登録した内容を、そのままサイネージ表示に出すため。MAKUAI_PROFILE を指定した
-# ときだけ専用のプロファイルに切り替える。
+# 既定ではブラウザ本来のプロファイルを使う。index.html を開いて登録した内容を、
+# そのままサイネージ表示に出すため。MAKUAI_PROFILE を指定したときだけ分ける。
 profile="${MAKUAI_PROFILE:-}"
 kiosk=1
 
@@ -24,16 +23,16 @@ usage() {
 makuai-slide-scheduler をサイネージモードで起動します。
 
   ./signage.sh              キオスク表示で起動する（本番）
-  ./signage.sh --windowed   ウィンドウで起動する（本番前の確認用）
-  ./signage.sh -- <引数...>  以降を Chromium にそのまま渡す
+  ./signage.sh --windowed   ウィンドウで起動する（設定や本番前の確認用）
+  ./signage.sh -- <引数...>  以降をブラウザにそのまま渡す
 
 環境変数:
-  MAKUAI_PROFILE   Chromium のプロファイルを専用のものに分けたいときに指定。
-                   既定ではブラウザ本来のプロファイルを使うので、
-                   index.html をダブルクリックして登録した内容がそのまま出ます。
+  MAKUAI_BROWSER   使うブラウザの実行ファイルを明示する
+  MAKUAI_PROFILE   プロファイルを専用のものに分けたいときに指定する
 
 登壇スケジュールの登録は index.html を開いて行ってください。
-このスクリプトは、登録済みの内容をキオスク表示するためのものです。
+既定のブラウザが Chrome / Edge / Chromium でない場合（Safari など）は、
+--windowed で開いて登録してください。設定はブラウザごとに別で保存されます。
 USAGE
 }
 
@@ -42,7 +41,6 @@ while [ $# -gt 0 ]; do
     -h|--help)  usage; exit 0 ;;
     --windowed) kiosk=0; shift ;;
     --)         shift; break ;;
-    -*)         echo "signage.sh: 不明な引数: $1" >&2; echo >&2; usage >&2; exit 2 ;;
     *)          echo "signage.sh: 不明な引数: $1" >&2; echo >&2; usage >&2; exit 2 ;;
   esac
 done
@@ -53,33 +51,58 @@ if [ ! -f "$page" ]; then
   exit 1
 fi
 
-# ---------- Chromium を探す ----------
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  Darwin) os="macos" ;;
+  *)      os="linux" ;;
+esac
+
+# ---------- ブラウザを探す ----------
+# 見つけた実行ファイルと、そのブラウザが設定を置く場所を組で決める。
 browser=""
-for candidate in chromium chromium-browser chromium-bin google-chrome-stable google-chrome; do
-  if command -v "$candidate" >/dev/null 2>&1; then browser="$candidate"; break; fi
-done
+config_dir=""
+
+try_mac() {   # $1=実行ファイル  $2=設定の置き場所
+  if [ -z "$browser" ] && [ -x "$1" ]; then browser="$1"; config_dir="$2"; fi
+}
+try_linux() { # $1=コマンド名    $2=設定の置き場所
+  if [ -z "$browser" ] && command -v "$1" >/dev/null 2>&1; then browser="$1"; config_dir="$2"; fi
+}
+
+if [ -n "${MAKUAI_BROWSER:-}" ]; then
+  browser="$MAKUAI_BROWSER"
+elif [ "$os" = "macos" ]; then
+  support="$HOME/Library/Application Support"
+  try_mac "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"   "$support/Google/Chrome"
+  try_mac "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" "$support/Google/Chrome"
+  try_mac "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" "$support/Microsoft Edge"
+  try_mac "/Applications/Chromium.app/Contents/MacOS/Chromium"             "$support/Chromium"
+else
+  try_linux chromium             "$HOME/.config/chromium"
+  try_linux chromium-browser     "$HOME/.config/chromium"
+  try_linux chromium-bin         "$HOME/.config/chromium"
+  try_linux google-chrome-stable "$HOME/.config/google-chrome"
+  try_linux google-chrome        "$HOME/.config/google-chrome"
+  try_linux microsoft-edge       "$HOME/.config/microsoft-edge"
+fi
+
 if [ -z "$browser" ]; then
-  echo "signage.sh: Chromium が見つかりません。" >&2
-  echo "  Raspberry Pi OS なら: sudo apt install -y chromium-browser" >&2
+  echo "signage.sh: Chrome / Edge / Chromium が見つかりません。" >&2
+  if [ "$os" = "macos" ]; then
+    echo "  Google Chrome を入れるか、MAKUAI_BROWSER で実行ファイルを指定してください。" >&2
+  else
+    echo "  Raspberry Pi OS なら: sudo apt install -y chromium-browser" >&2
+  fi
   exit 1
 fi
 
-# 設定の置き場所。exit_type の書き換えに使う。
-if [ -n "$profile" ]; then
-  config_dir="$profile"
-else
-  case "$browser" in
-    google-chrome*) config_dir="$HOME/.config/google-chrome" ;;
-    *)              config_dir="$HOME/.config/chromium" ;;
-  esac
-fi
+# プロファイルを明示された場合は、そちらを設定の置き場所として扱う
+if [ -n "$profile" ]; then config_dir="$profile"; fi
 
 # ---------- すでに開いているブラウザがあると、キオスクにならない ----------
-# 同じプロファイルで起動中だと、Chromium は新しいウィンドウを既存のプロセスに
+# 同じプロファイルで起動中だと、ブラウザは新しいウィンドウを既存のプロセスに
 # 任せてしまい、--kiosk が効かずに普通のタブが開くだけになる。
-lock="$config_dir/SingletonLock"
-if [ -L "$lock" ]; then
-  lock_pid="$(readlink "$lock" 2>/dev/null || true)"
+if [ -n "$config_dir" ] && [ -L "$config_dir/SingletonLock" ]; then
+  lock_pid="$(readlink "$config_dir/SingletonLock" 2>/dev/null || true)"
   lock_pid="${lock_pid##*-}"
   if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
     echo "signage.sh: ブラウザがすでに起動しています（PID $lock_pid）。" >&2
@@ -89,50 +112,58 @@ if [ -L "$lock" ]; then
   fi
 fi
 
-# ---------- 画面を探す ----------
-# SSH から叩くと DISPLAY も WAYLAND_DISPLAY も無いので、標準的な値を補う。
-if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
-  XDG_RUNTIME_DIR="/run/user/$(id -u)"
-  export XDG_RUNTIME_DIR
-fi
-if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -e "$XDG_RUNTIME_DIR/wayland-0" ]; then
-  export WAYLAND_DISPLAY=wayland-0
-fi
-if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-}" ] && [ -e "/tmp/.X11-unix/X0" ]; then
-  export DISPLAY=:0
-fi
+# ---------- 画面を用意する ----------
+prefix=()
+flags=()
 
-if [ -n "${WAYLAND_DISPLAY:-}" ]; then
-  platform="wayland"
-elif [ -n "${DISPLAY:-}" ]; then
-  platform="x11"
+if [ "$os" = "linux" ]; then
+  # SSH から叩くと DISPLAY も WAYLAND_DISPLAY も無いので、標準的な値を補う。
+  if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    XDG_RUNTIME_DIR="/run/user/$(id -u)"; export XDG_RUNTIME_DIR
+  fi
+  if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -e "$XDG_RUNTIME_DIR/wayland-0" ]; then
+    export WAYLAND_DISPLAY=wayland-0
+  fi
+  if [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-}" ] && [ -e "/tmp/.X11-unix/X0" ]; then
+    export DISPLAY=:0
+  fi
+
+  if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    display="wayland"
+  elif [ -n "${DISPLAY:-}" ]; then
+    display="x11"
+  else
+    echo "signage.sh: 表示先の画面が見つかりません。" >&2
+    echo "  デスクトップにログインした状態で実行してください。" >&2
+    echo "  SSH から起動する場合は、先に WAYLAND_DISPLAY か DISPLAY を設定してください。" >&2
+    exit 1
+  fi
+  flags+=("--ozone-platform=$display" --password-store=basic)
+
+  # 画面が消えないようにする
+  if [ "$display" = "x11" ] && command -v xset >/dev/null 2>&1; then
+    xset s off -dpms s noblank >/dev/null 2>&1 || true
+  elif [ "$display" = "wayland" ]; then
+    # Wayland ではスクリーンブランクをアプリ側から止められない。
+    echo "signage.sh: 画面の自動消灯は raspi-config で切ってください" >&2
+    echo "  sudo raspi-config -> Display Options -> Screen Blanking -> No" >&2
+  fi
 else
-  echo "signage.sh: 表示先の画面が見つかりません。" >&2
-  echo "  デスクトップにログインした状態で実行してください。" >&2
-  echo "  SSH から起動する場合は、先に WAYLAND_DISPLAY か DISPLAY を設定してください。" >&2
-  exit 1
-fi
-
-# ---------- 画面が消えないようにする ----------
-if [ "$platform" = "x11" ] && command -v xset >/dev/null 2>&1; then
-  xset s off -dpms s noblank >/dev/null 2>&1 || true
-elif [ "$platform" = "wayland" ]; then
-  # Wayland ではスクリーンブランクをアプリ側から止められない。
-  echo "signage.sh: 画面の自動消灯は raspi-config で切ってください" >&2
-  echo "  sudo raspi-config -> Display Options -> Screen Blanking -> No" >&2
+  display="macos"
+  # 表示中だけスリープとディスプレイオフを抑える
+  if command -v caffeinate >/dev/null 2>&1; then prefix=(caffeinate -dis); fi
 fi
 
 # ---------- 前回の異常終了を引きずらない ----------
 # 電源を落として終わる運用だと、次の起動で「復元しますか」が出て画面を塞ぐ。
-prefs="$config_dir/Default/Preferences"
-if [ -f "$prefs" ]; then
-  sed -i 's/"exit_type":"[^"]*"/"exit_type":"Normal"/' "$prefs" 2>/dev/null || true
+if [ -n "$config_dir" ] && [ -f "$config_dir/Default/Preferences" ]; then
+  sed -i.bak 's/"exit_type":"[^"]*"/"exit_type":"Normal"/' \
+    "$config_dir/Default/Preferences" 2>/dev/null || true
+  rm -f "$config_dir/Default/Preferences.bak" 2>/dev/null || true
 fi
 
 # ---------- 起動 ----------
-flags=(
-  "--ozone-platform=$platform"
-  --password-store=basic
+flags+=(
   --no-first-run
   --no-default-browser-check
   --noerrdialogs
@@ -154,11 +185,12 @@ else
   flags+=(--window-size=1280,720)
 fi
 
-echo "signage.sh: $browser ($platform) で起動します"
+echo "signage.sh: $browser ($display) で起動します"
 echo "  ページ         : $page"
 if [ -n "$profile" ]; then
   echo "  プロファイル   : $profile"
 fi
-if [ "$kiosk" -eq 1 ]; then echo "  終了           : Ctrl+C、または表示中に Alt+F4"; fi
+if [ "$kiosk" -eq 1 ]; then echo "  終了           : Ctrl+C、または表示中に Alt+F4 / Cmd+Q"; fi
 
-exec "$browser" "${flags[@]}" "$@" "file://$page"
+# macOS の /bin/bash は 3.2 で、set -u のもとでは空配列の展開が落ちる。
+exec ${prefix[@]+"${prefix[@]}"} "$browser" "${flags[@]}" "$@" "file://$page"
