@@ -5,6 +5,25 @@
 
 ## [未リリース]
 
+## [1.1.0] - 2026-09-20
+
+起動スクリプトが、登録に使ったブラウザと別のブラウザを開いてしまうことが
+あったのを直しました。
+
+### 追加
+
+- 起動スクリプトが既定のブラウザを検出し、Chrome 系ならそれを優先するようになった。
+  macOS は LaunchServices、Linux は `xdg-settings`、Windows はレジストリの
+  `UrlAssociations\http\UserChoice` から読む
+- どのブラウザをなぜ選んだかを起動時に表示するようになった
+- Microsoft Edge をユーザー領域に入れている場合も見つけられるようになった
+
+### 修正
+
+- 設定はブラウザごとに別に保存されるのに、起動スクリプトが Chrome を無条件に
+  優先していたため、既定が Edge で Chrome も入っている環境では、登録した内容が
+  出てこずセットアップ画面に戻ってしまっていた
+
 ## [1.0.1] - 2026-09-20
 
 動作の変更はありません。初めて使う人が手順どおりに進めない箇所があったため、
@@ -46,6 +65,7 @@
 - 起動スクリプト。Linux / Raspberry Pi OS は `signage.sh`、macOS は `signage.command`、
   Windows は `signage.cmd`
 
-[未リリース]: https://github.com/miura-bd/makuai-slide-scheduler/compare/v1.0.1...HEAD
+[未リリース]: https://github.com/miura-bd/makuai-slide-scheduler/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/miura-bd/makuai-slide-scheduler/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/miura-bd/makuai-slide-scheduler/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/miura-bd/makuai-slide-scheduler/releases/tag/v1.0.0
