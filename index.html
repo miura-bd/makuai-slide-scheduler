@@ -341,7 +341,6 @@
  * ============================================================ */
 
 var STORE_KEY = "makuai.config.v1";
-var STORE_KEY_LEGACY = "kanmaku.config.v1";  // 旧名。保存済みの設定を引き継ぐ
 
 var BLANK = {
   eventName: "",
@@ -393,8 +392,7 @@ function normalize(c) {
 
 function loadStored() {
   try {
-    var raw = window.localStorage.getItem(STORE_KEY)
-           || window.localStorage.getItem(STORE_KEY_LEGACY);
+    var raw = window.localStorage.getItem(STORE_KEY);
     if (raw) return normalize(JSON.parse(raw));
   } catch (e) { /* file:// では使えないことがある */ }
   return null;
