@@ -5,6 +5,28 @@
 
 ## [未リリース]
 
+## [1.0.1] - 2026-09-20
+
+動作の変更はありません。初めて使う人が手順どおりに進めない箇所があったため、
+そこを埋めたドキュメントの修正です。
+
+### 修正
+
+- 起動手順に、ターミナルで展開したフォルダへ移動する指示がなかった。
+  ホームディレクトリで `./signage.sh` を叩くと `No such file or directory` で止まる
+- 実行権限が落ちた場合の復旧手順（`chmod +x`）がなかった。
+  Windows 経由や USB メモリ経由でコピーすると起こる
+- キオスク表示の終了方法が macOS と Windows にだけ書かれており、Linux が抜けていた
+
+### 変更
+
+- README のヒーロー画像に埋め込んだデモスライドが Raspberry Pi 専用に見える
+  内容だったため、環境に寄らない一般的な登壇タイトルに差し替えた
+- 時計合わせの説明が Linux 前提だったので、macOS / Windows は自動同期であること、
+  RTC を持たないのは Raspberry Pi だけであることを分けて書いた
+- 既知の制限を「制約」に明記した。日付をまたぐスケジュールに対応していないこと、
+  Windows 版の起動スクリプトが実機未検証であること
+
 ## [1.0.0] - 2026-09-20
 
 最初のリリース。
@@ -24,5 +46,6 @@
 - 起動スクリプト。Linux / Raspberry Pi OS は `signage.sh`、macOS は `signage.command`、
   Windows は `signage.cmd`
 
-[未リリース]: https://github.com/miura-bd/makuai-slide-scheduler/compare/v1.0.0...HEAD
+[未リリース]: https://github.com/miura-bd/makuai-slide-scheduler/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/miura-bd/makuai-slide-scheduler/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/miura-bd/makuai-slide-scheduler/releases/tag/v1.0.0
