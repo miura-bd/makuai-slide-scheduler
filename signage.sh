@@ -13,9 +13,10 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 page="$here/index.html"
-# 通常のブラウジング用プロファイルを汚さないよう、専用の置き場を使う。
-# 設定（登壇スケジュール）はここに残るので、消すと登録がやり直しになる。
-profile="${MAKUAI_PROFILE:-$HOME/.config/makuai-slide-scheduler/chromium}"
+# 既定ではブラウザ本来のプロファイルを使う。index.html をダブルクリックして
+# 登録した内容を、そのままサイネージ表示に出すため。MAKUAI_PROFILE を指定した
+# ときだけ専用のプロファイルに切り替える。
+profile="${MAKUAI_PROFILE:-}"
 kiosk=1
 
 usage() {
@@ -27,11 +28,12 @@ makuai-slide-scheduler をサイネージモードで起動します。
   ./signage.sh -- <引数...>  以降を Chromium にそのまま渡す
 
 環境変数:
-  MAKUAI_PROFILE   Chromium のプロファイルの置き場所
-                   既定: ~/.config/makuai-slide-scheduler/chromium
+  MAKUAI_PROFILE   Chromium のプロファイルを専用のものに分けたいときに指定。
+                   既定ではブラウザ本来のプロファイルを使うので、
+                   index.html をダブルクリックして登録した内容がそのまま出ます。
 
-登壇スケジュールは表示中に S キーで登録します。設定はプロファイルに
-保存されるため、このスクリプト経由で開いている限り引き継がれます。
+登壇スケジュールの登録は index.html を開いて行ってください。
+このスクリプトは、登録済みの内容をキオスク表示するためのものです。
 USAGE
 }
 
@@ -60,6 +62,31 @@ if [ -z "$browser" ]; then
   echo "signage.sh: Chromium が見つかりません。" >&2
   echo "  Raspberry Pi OS なら: sudo apt install -y chromium-browser" >&2
   exit 1
+fi
+
+# 設定の置き場所。exit_type の書き換えに使う。
+if [ -n "$profile" ]; then
+  config_dir="$profile"
+else
+  case "$browser" in
+    google-chrome*) config_dir="$HOME/.config/google-chrome" ;;
+    *)              config_dir="$HOME/.config/chromium" ;;
+  esac
+fi
+
+# ---------- すでに開いているブラウザがあると、キオスクにならない ----------
+# 同じプロファイルで起動中だと、Chromium は新しいウィンドウを既存のプロセスに
+# 任せてしまい、--kiosk が効かずに普通のタブが開くだけになる。
+lock="$config_dir/SingletonLock"
+if [ -L "$lock" ]; then
+  lock_pid="$(readlink "$lock" 2>/dev/null || true)"
+  lock_pid="${lock_pid##*-}"
+  if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+    echo "signage.sh: ブラウザがすでに起動しています（PID $lock_pid）。" >&2
+    echo "  開いているウィンドウをすべて閉じてから、もう一度実行してください。" >&2
+    echo "  そのまま起動すると、キオスク表示にならず普通のタブが開くだけになります。" >&2
+    exit 1
+  fi
 fi
 
 # ---------- 画面を探す ----------
@@ -97,16 +124,14 @@ fi
 
 # ---------- 前回の異常終了を引きずらない ----------
 # 電源を落として終わる運用だと、次の起動で「復元しますか」が出て画面を塞ぐ。
-prefs="$profile/Default/Preferences"
+prefs="$config_dir/Default/Preferences"
 if [ -f "$prefs" ]; then
   sed -i 's/"exit_type":"[^"]*"/"exit_type":"Normal"/' "$prefs" 2>/dev/null || true
 fi
-mkdir -p "$profile"
 
 # ---------- 起動 ----------
 flags=(
   "--ozone-platform=$platform"
-  "--user-data-dir=$profile"
   --password-store=basic
   --no-first-run
   --no-default-browser-check
@@ -119,6 +144,10 @@ flags=(
   --autoplay-policy=no-user-gesture-required
   --overscroll-history-navigation=0
 )
+if [ -n "$profile" ]; then
+  mkdir -p "$profile"
+  flags+=("--user-data-dir=$profile")
+fi
 if [ "$kiosk" -eq 1 ]; then
   flags+=(--kiosk)
 else
@@ -127,7 +156,9 @@ fi
 
 echo "signage.sh: $browser ($platform) で起動します"
 echo "  ページ         : $page"
-echo "  プロファイル   : $profile"
+if [ -n "$profile" ]; then
+  echo "  プロファイル   : $profile"
+fi
 if [ "$kiosk" -eq 1 ]; then echo "  終了           : Ctrl+C、または表示中に Alt+F4"; fi
 
 exec "$browser" "${flags[@]}" "$@" "file://$page"
